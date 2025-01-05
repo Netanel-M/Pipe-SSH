@@ -1,0 +1,97 @@
+#!/usr/bin/python3
+import os
+import sys
+import subprocess
+import argparse
+
+BASHRC_PATH = os.path.expanduser("~/.bashrc")
+ALIAS_MARKER_START = "# PIPE_SSH ALIASES START"
+ALIAS_MARKER_END = "# PIPE_SSH ALIASES END"
+
+def parse_ssh_config():
+    ssh_config_path = os.path.expanduser("~/.ssh/config")
+    hosts = {}
+    with open(ssh_config_path, 'r') as f:
+        host = None
+        for line in f:
+            line = line.strip()
+            if line.startswith("Host "):
+                host = line.split()[1]
+                hosts[host] = {}
+            elif host:
+                key, value = line.split(None, 1)
+                hosts[host][key] = value
+    return hosts
+
+def create_aliases(hosts):
+    script_path = os.path.abspath(__file__)
+    alias_commands = []
+    for host in hosts:
+        alias_command = f"alias {host}='python3 {script_path} run -host {host}'"
+        alias_commands.append(alias_command)
+    return alias_commands
+
+def ssh_and_run_command(host, command, hosts):
+    user = hosts.get(host, {}).get('User', os.getlogin())
+    ssh_command = ["ssh", f"{user}@{host}", command]
+    subprocess.run(ssh_command)
+
+def add_aliases_to_bashrc(aliases):
+    with open(BASHRC_PATH, 'r') as f:
+        lines = f.readlines()
+
+    start_index = None
+    end_index = None
+    for i, line in enumerate(lines):
+        if line.strip() == ALIAS_MARKER_START:
+            start_index = i
+        elif line.strip() == ALIAS_MARKER_END:
+            end_index = i
+
+    if start_index is not None and end_index is not None:
+        del lines[start_index:end_index + 1]
+
+    lines.append(f"\n{ALIAS_MARKER_START}\n")
+    lines.extend([f"{alias}\n" for alias in aliases])
+    lines.append(f"{ALIAS_MARKER_END}\n")
+
+    with open(BASHRC_PATH, 'w') as f:
+        f.writelines(lines)
+
+def remove_aliases_from_bashrc():
+    with open(BASHRC_PATH, 'r') as f:
+        lines = f.readlines()
+
+    start_index = None
+    end_index = None
+    for i, line in enumerate(lines):
+        if line.strip() == ALIAS_MARKER_START:
+            start_index = i
+        elif line.strip() == ALIAS_MARKER_END:
+            end_index = i
+
+    if start_index is not None and end_index is not None:
+        del lines[start_index:end_index + 1]
+
+    with open(BASHRC_PATH, 'w') as f:
+        f.writelines(lines)
+
+def main():
+    parser = argparse.ArgumentParser(description="Pipe SSH script")
+    parser.add_argument("action", choices=["init", "run", "clean"], help="Action to perform")
+    parser.add_argument("-host", help="Host to SSH into")
+    args = parser.parse_args()
+
+    if args.action == "init":
+        hosts = parse_ssh_config()
+        aliases = create_aliases(hosts)
+        add_aliases_to_bashrc(aliases)
+    elif args.action == "clean":
+        remove_aliases_from_bashrc()
+    elif args.host:
+        hosts = parse_ssh_config()
+        command = sys.stdin.read().strip()
+        ssh_and_run_command(args.host, command, hosts)
+
+if __name__ == "__main__":
+    main()
